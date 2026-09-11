@@ -118,6 +118,8 @@ private final class BackgroundLocationTracker: NSObject, CLLocationManagerDelega
     guard store.bool(forKey: runningKey) else { return }
     beginBackgroundTask()
     manager.startUpdatingLocation()
+    startMinuteTimer()
+    NSLog("[location_baohuo] background monitoring active")
   }
 
   func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -169,7 +171,7 @@ private final class BackgroundLocationTracker: NSObject, CLLocationManagerDelega
   private func startMinuteTimer() {
     guard timer == nil else { return }
     let newTimer = DispatchSource.makeTimerSource(queue: .main)
-    newTimer.schedule(deadline: .now(), repeating: .seconds(60))
+    newTimer.schedule(deadline: .now() + .seconds(60), repeating: .seconds(60))
     newTimer.setEventHandler { [weak self] in self?.recordMinuteTick() }
     timer = newTimer
     newTimer.resume()
@@ -178,7 +180,7 @@ private final class BackgroundLocationTracker: NSObject, CLLocationManagerDelega
   private func recordMinuteTick() {
     store.set(store.integer(forKey: minuteCountKey) + 1, forKey: minuteCountKey)
     store.set(Date().timeIntervalSince1970 * 1000, forKey: tickDateKey)
-    NSLog("background minute count = \(store.integer(forKey: minuteCountKey))")
+    NSLog("[location_baohuo] background minute count = \(store.integer(forKey: minuteCountKey))")
   }
 
   private func beginBackgroundTask() {
