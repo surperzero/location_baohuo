@@ -21,14 +21,25 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "BackgroundLocationTracker")
+    guard let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "BackgroundLocationTracker"
+    ) else {
+      return
+    }
     let channel = FlutterMethodChannel(
       name: "location_baohuo/background_location",
       binaryMessenger: registrar.messenger()
     )
-    channel.setMethodCallHandler { [weak self] call, result in
-      guard let self else {
-        result(FlutterError(code: "unavailable", message: "App delegate unavailable", details: nil))
+    channel.setMethodCallHandler { [weak self] (
+      call: FlutterMethodCall,
+      result: @escaping FlutterResult
+    ) in
+      guard let self = self else {
+        result(FlutterError(
+          code: "unavailable",
+          message: "App delegate unavailable",
+          details: nil
+        ))
         return
       }
       switch call.method {
