@@ -3,11 +3,13 @@ name: iOS Signed Build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: macos-14
+
     env:
       BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
       P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -15,36 +17,110 @@ jobs:
       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.0'
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install signing certificate and provisioning profile
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.0"
+          channel: stable
+
+      - name: Install certificate and provisioning profile
         shell: bash
         run: |
+          set -e
+
           CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
           PROFILE_PATH="$RUNNER_TEMP/build_profile.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 -D -o "$CERTIFICATE_PATH"
-          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 -D -o "$PROFILE_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
-      - name: Build signed IPA
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security set-keychain-settings \
+            -lut 21600 \
+            "$KEYCHAIN_PATH"
+
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain \
+            -d user \
+            -s "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security cms \
+            -D \
+            -i "$PROFILE_PATH" \
+            > "$PROFILE_PLIST"
+
+          PROFILE_UUID=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :UUID" \
+              "$PROFILE_PLIST"
+          )
+
+          PROFILE_NAME=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Name" \
+              "$PROFILE_PLIST"
+          )
+
+          echo "PROFILE_UUID=$PROFILE_UUID"
+          echo "PROFILE_NAME=$PROFILE_NAME"
+
+          mkdir -p \
+            "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          cp "$PROFILE_PATH" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create unsigned archive
         run: |
-          flutter pub get
-          flutter build ipa --release --build-number="$GITHUB_RUN_NUMBER" --export-options-plist=ios/ExportOptions.plist
+          flutter build ipa \
+            --release \
+            --no-codesign \
+            --build-number="$GITHUB_RUN_NUMBER"
 
-      - uses: actions/upload-artifact@v4
+      - name: Export signed IPA
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf build/ios/ipa
+          mkdir -p build/ios/ipa
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            -exportPath build/ios/ipa \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -allowProvisioningUpdates
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
         with:
           name: location-baohuo-ipa
           path: build/ios/ipa/*.ipa
